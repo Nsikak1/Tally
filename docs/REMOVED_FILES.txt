@@ -1,0 +1,6 @@
+app/src/main/java/ng/name/nsikak/libaccession/data/lookup/BookProvider.kt
+app/src/main/java/ng/name/nsikak/libaccession/data/lookup/GoogleBooksProvider.kt
+app/src/main/java/ng/name/nsikak/libaccession/data/lookup/OpenLibraryProvider.kt
+server_addon/README.md
+server_addon/online_lookup.py
+server_addon/test_online_lookup.py

@@ -1,0 +1,39 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/app/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+# Gradle files
+build/
+.kotlin/
+
+# Model Download file
+app/src/main/assets/ppocr/
+
+# Local configuration file (sdk path, etc)
+local.properties
+# Log/OS Files
+*.log
+# Android Studio generated files and folders
+captures/
+*.aab
+*.apk
+output-metadata.json
+# IntelliJ
+.idea/
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+# Keystore files
+*.jks
+*.keystore
+# Google Services (e.g. APIs or Firebase)
+google-services.json
+# Android Profiling
+*.hprof
+server

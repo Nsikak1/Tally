@@ -1,0 +1,21 @@
+I'm continuing the Android app Tally (school-library scanner) from an earlier chat that got too long. Attached: Tally-handoff-v0.7.1.zip (the whole project, including docs/HANDOFF.md, docs/CODE_MAP.md and the server source in server/).
+
+STEP 1 (do now, no code yet): unzip it, read docs/HANDOFF.md sections 0, 1, 4a, 4, 6, 9, 11 and docs/CODE_MAP.md. Do NOT read the rest of the code yet. Reply in under 150 words with:
+(a) one-paragraph state of the project, (b) the first 3 things you will do, (c) only the questions from HANDOFF section 9 "Open questions" that my test results below don't already answer (max 3).
+
+RULES (all in HANDOFF section 0 and 1; the short version):
+- Save tokens: never redo anything marked DONE/WRITTEN in section 6, never re-research pinned versions (section 5), edit files in place with small asserted patch scripts, open only the files a task touches, keep chat replies short and phone-friendly, no code in chat.
+- Deliver the WHOLE project as a zip (complete files, never snippets), the numbered commands with where each runs (laptop / server / Termux / phone), and what to test next. You cannot compile Android: say so, review your code for compile errors, test pure logic by Python ports (scripts/logic_tests.py, server/test_*.py). I paste the first line starting with "e:" when a build fails.
+- One milestone at a time; I test before the next.
+- My pipeline (HANDOFF 4a): Termux reaches the server as ils@ssh.nsikak.name.ng; I reuse ~/dev/Tally (unzip -oq over it, then delete files listed in docs/REMOVED_FILES.txt), build with bash scripts/build.sh, and pull only the APK difference with rsync from dist/Tally.apk. Keep REMOVED_FILES.txt cumulative. Never put API keys in any file or in the zip.
+
+MY TEST RESULTS (edit before sending; delete lines that don't apply):
+- Device Android version / API level: [ ]    minSdk I use: [ ]
+- Build of v0.7.x: [worked / first "e:" line: ...]
+- Library list crash (adb logcat -b crash text): [ ]
+- Server: port that answers [4321/8080]; install_update.sh result [ ]; the lookup test output for 9780385474542 [ ]
+- Scan shows book details + cover [ ]   Details from Google Books for a book the server lacks [ ]
+- Double-tap zoom / read [ ]   Guided camera fill [ ]   Small vs medium reader [ ]
+- Second accession number format: [ ]
+
+AFTER YOUR STEP 1 REPLY: fix whatever my results show (crash first), then milestone 4 (search), then wait for my test.
