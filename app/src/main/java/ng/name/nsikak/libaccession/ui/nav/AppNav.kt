@@ -72,6 +72,7 @@ fun AppNav() {
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 onOpenScanner = { nav.navigate(Routes.scanner()) },
                 onOpenHoldings = { nav.navigate(Routes.HOLDINGS) },
+                onAddHolding = { nav.navigate(Routes.newHolding()) },
             )
         }
         composable(Routes.SETTINGS) {

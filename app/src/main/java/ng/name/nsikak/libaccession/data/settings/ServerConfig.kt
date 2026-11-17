@@ -35,7 +35,10 @@ data class ServerConfig(val baseUrl: String) {
  */
 object CleartextPolicy {
     val ALLOWED_HOSTS = setOf("192.168.1.117", "school.local")
-    fun isAllowed(host: String): Boolean = host.lowercase() in ALLOWED_HOSTS
+    fun isAllowed(host: String): Boolean {
+        val h = host.lowercase()
+        return h in ALLOWED_HOSTS || h.endsWith(".local") || h == "local" || IPV4.matches(h)
+    }
 }
 
 private val IPV4 = Regex("""\d{1,3}(\.\d{1,3}){3}""")

@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import ng.name.nsikak.tally.build.GenerateDeltaUpdateTask
 
 plugins {
     alias(libs.plugins.android.application)
@@ -8,6 +9,9 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val propVersionCode = project.findProperty("versionCode")?.toString()?.toIntOrNull() ?: 9
+val propVersionName = project.findProperty("versionName")?.toString() ?: "0.8.0"
+
 android {
     namespace = "ng.name.nsikak.libaccession"
     compileSdk = 35
@@ -16,8 +20,8 @@ android {
         applicationId = "ng.name.nsikak.libaccession"
         minSdk = 25
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.8.0"
+        versionCode = propVersionCode
+        versionName = propVersionName
     }
 
     buildTypes {
@@ -55,7 +59,7 @@ android {
     packaging {
         resources.excludes += listOf(
             "/META-INF/{AL2.0,LGPL2.1}",
-            "/META-INF/*.version",
+           // "/META-INF/*.version",
             "DebugProbesKt.bin",
             "kotlin-tooling-metadata.json",
         )
@@ -79,6 +83,8 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.icons.core)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -104,4 +110,21 @@ dependencies {
     // Local cache of looked-up books
     implementation(libs.androidx.room.runtime)
     ksp(libs.androidx.room.compiler)
+
+    testImplementation("junit:junit:4.13.2")
+}
+
+tasks.register("generateDeltaUpdate", GenerateDeltaUpdateTask::class.java) {
+    dependsOn("assembleRelease")
+    description = "Generates BSDiff delta update patches and update-manifest.json for release builds."
+    group = "publishing"
+
+    targetVersionCode = android.defaultConfig.versionCode?.toLong()
+    targetVersionName = android.defaultConfig.versionName
+}
+
+tasks.register("publishDeltaUpdate") {
+    dependsOn("generateDeltaUpdate")
+    description = "Alias for generateDeltaUpdate."
+    group = "publishing"
 }

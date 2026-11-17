@@ -13,12 +13,12 @@ data class PatchInfo(
 
 @Serializable
 data class UpdateInfoResponse(
-    @SerialName("latestVersionCode") val latestVersionCode: Long,
-    @SerialName("latestVersionName") val latestVersionName: String,
+    @SerialName("latestVersionCode") val latestVersionCode: Long = 0,
+    @SerialName("latestVersionName") val latestVersionName: String = "",
     @SerialName("minSupportedVersionCode") val minSupportedVersionCode: Long = 1,
     @SerialName("releaseNotes") val releaseNotes: String = "",
-    @SerialName("fullApkUrl") val fullApkUrl: String,
-    @SerialName("fullApkSha256") val fullApkSha256: String,
+    @SerialName("fullApkUrl") val fullApkUrl: String = "",
+    @SerialName("fullApkSha256") val fullApkSha256: String = "",
     @SerialName("fullApkSizeBytes") val fullApkSizeBytes: Long = 0,
     @SerialName("patches") val patches: List<PatchInfo> = emptyList()
 )

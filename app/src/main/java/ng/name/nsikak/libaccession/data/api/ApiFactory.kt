@@ -1,5 +1,6 @@
 package ng.name.nsikak.libaccession.data.api
 
+import android.content.Context
 import android.os.SystemClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
@@ -15,7 +16,7 @@ import java.util.concurrent.TimeUnit
  * Builds a Retrofit client for whatever address is currently configured (LAN IP, school.local,
  * or any https:// domain such as a tunnel). The OkHttpClient is shared; Retrofit instances are cheap.
  */
-class ApiFactory {
+class ApiFactory(context: Context) {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -24,6 +25,7 @@ class ApiFactory {
 
     // The server is small and slow when cold (server briefing): 15 s read timeout.
     private val baseClient = OkHttpClient.Builder()
+        .dns(MdnsDnsResolver(context.applicationContext))
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)

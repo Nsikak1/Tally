@@ -44,6 +44,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenScanner: () -> Unit,
     onOpenHoldings: () -> Unit,
+    onAddHolding: () -> Unit,
     vm: HomeViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -116,6 +117,9 @@ fun HomeScreen(
 
             Button(onClick = onOpenScanner, modifier = Modifier.fillMaxWidth()) {
                 Text("Scan a book")
+            }
+            Button(onClick = onAddHolding, modifier = Modifier.fillMaxWidth()) {
+                Text("Add Book Manually")
             }
             Button(onClick = onOpenHoldings, modifier = Modifier.fillMaxWidth()) {
                 Text("Library list")

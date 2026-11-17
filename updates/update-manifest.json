@@ -1,0 +1,17 @@
+{
+  "latestVersionCode": 10,
+  "latestVersionName": "0.9.0",
+  "minSupportedVersionCode": 1,
+  "releaseNotes": "Added delta patch support.",
+  "fullApkUrl": "http://192.168.1.117:4321/updates/apks/tally-v0.9.0-vc10.apk",
+  "fullApkSha256": "cf66ab160da4322ea742632462c5950856f758554999ecd827b6a7d805eaa2f6",
+  "fullApkSizeBytes": 105052779,
+  "patches": [
+    {
+      "fromVersionCode": 9,
+      "patchUrl": "http://192.168.1.117:4321/updates/patches/patch-v9-to-v10.patch",
+      "patchSha256": "b6d606f21fbcefb8b293cd6cd36b8917ff810d5da0f4aab8bfdeb5fe797cce14",
+      "patchSizeBytes": 112071
+    }
+  ]
+}

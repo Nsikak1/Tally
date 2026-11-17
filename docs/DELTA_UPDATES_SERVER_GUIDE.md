@@ -94,6 +94,31 @@ Organize your update storage directory on the server as follows:
 
 ---
 
+## 4.1 Automated Gradle Task (`generateDeltaUpdate`)
+
+The project includes a built-in Gradle task `generateDeltaUpdate` (or alias `publishDeltaUpdate`) that automates:
+1. Building the minified, resource-shrunk, and zip-aligned release APK (`assembleRelease`).
+2. Placing the release APK in the server update output directory (`apks/tally-v{versionName}-vc{versionCode}.apk`).
+3. Generating binary BSDiff patches against all previous release APKs found in `apks/`.
+   - Uses system `bsdiff` CLI if available; seamlessly falls back to an embedded pure-Kotlin `BsdiffGenerator` engine if `bsdiff` CLI is not installed.
+4. Computing SHA-256 checksums and file sizes.
+5. Updating `update-manifest.json`.
+
+### Basic Usage
+```bash
+# Build and publish current release version (from build.gradle.kts)
+./gradlew generateDeltaUpdate
+
+# Publish a new release version with custom version parameters and release notes
+./gradlew generateDeltaUpdate -PversionCode=10 -PversionName=0.9.0 -PreleaseNotes="Faster scanner & self-update support."
+
+# Specify custom server base URL or output directory
+./gradlew generateDeltaUpdate -PupdateServerUrl="http://192.168.1.117:4321/updates" -PupdateOutputDir="/var/www/tally-updates"
+```
+
+
+---
+
 ## 5. Automated Python Publishing Script (`publish_update.py`)
 
 Save this script as `publish_update.py` in your server workspace or release pipeline.
@@ -220,19 +245,37 @@ If hosting via Python FastAPI or Node.js, serve the JSON file at `/api/v1/app/ch
 
 #### FastAPI Example:
 ```python
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 import json
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 
 app = FastAPI()
 
-# Serve updates static directory
-app.mount("/updates", StaticFiles(directory="/var/www/tally-updates"), name="updates")
+UPDATES_DIR = Path("/var/www/tally-updates")
+
+@app.get("/updates/{file_path:path}")
+def serve_update_file(file_path: str):
+    target = (UPDATES_DIR / file_path).resolve()
+    if target.is_file():
+        return FileResponse(target)
+    raise HTTPException(404, "file not found")
 
 @app.get("/api/v1/app/check-update")
 def check_update():
-    with open("/var/www/tally-updates/update-manifest.json", "r") as f:
+    manifest_path = UPDATES_DIR / "update-manifest.json"
+    if not manifest_path.exists():
+        return {
+            "latestVersionCode": 0,
+            "latestVersionName": "0.0.0",
+            "minSupportedVersionCode": 1,
+            "releaseNotes": "No update published yet.",
+            "fullApkUrl": "",
+            "fullApkSha256": "",
+            "fullApkSizeBytes": 0,
+            "patches": []
+        }
+    with open(manifest_path, "r", encoding="utf-8") as f:
         return json.load(f)
 ```
 

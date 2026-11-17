@@ -14,3 +14,9 @@
 # ONNX Runtime (PaddleOCR) uses reflection/JNI: keep its classes, as its docs require for R8.
 -keep class ai.onnxruntime.** { *; }
 -dontwarn ai.onnxruntime.**
+
+# Compose Layout Inspector rules (preserves inspectable information for Layout Inspector)
+-keepclassmembers class androidx.compose.ui.platform.InspectableValueKt {
+    boolean isDebugInspectorInfoEnabled;
+}
+

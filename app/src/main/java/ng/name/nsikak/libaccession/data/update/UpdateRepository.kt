@@ -11,9 +11,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import ng.name.nsikak.libaccession.data.api.ApiFactory
 import ng.name.nsikak.libaccession.data.settings.ServerConfig
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.io.File
@@ -46,6 +49,24 @@ class UpdateRepository(
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(UpdateApi::class.java)
+    }
+
+    private fun resolveDownloadUrl(config: ServerConfig, urlString: String): String {
+        return try {
+            val baseUrl = config.baseUrl.toHttpUrl()
+            val targetUrl = urlString.toHttpUrlOrNull()
+            if (targetUrl != null) {
+                baseUrl.newBuilder()
+                    .encodedPath(targetUrl.encodedPath)
+                    .encodedQuery(targetUrl.encodedQuery)
+                    .build()
+                    .toString()
+            } else {
+                baseUrl.resolve(urlString)?.toString() ?: urlString
+            }
+        } catch (_: Exception) {
+            urlString
+        }
     }
 
     fun getCurrentVersionCode(): Long {
@@ -96,9 +117,15 @@ class UpdateRepository(
                 UpdateStatus.UpToDate
             }
         } catch (e: Exception) {
-            val error = UpdateStatus.Error("Failed to check for updates: ${e.localizedMessage ?: "Network error"}")
-            _updateStatus.value = error
-            error
+            val isNotFound = (e is HttpException) && (e.code() == 404)
+            if (isNotFound) {
+                _updateStatus.value = UpdateStatus.UpToDate
+                UpdateStatus.UpToDate
+            } else {
+                val error = UpdateStatus.Error("Failed to check for updates: ${e.localizedMessage ?: "Network error"}")
+                _updateStatus.value = error
+                error
+            }
         }
     }
 
@@ -119,7 +146,8 @@ class UpdateRepository(
             val patchedApkFile = File(cacheDir, "tally-v${updateInfo.latestVersionCode}-delta.apk")
 
             try {
-                val responseBody = api.downloadFile(patchInfo.patchUrl)
+                val resolvedPatchUrl = resolveDownloadUrl(serverConfig, patchInfo.patchUrl)
+                val responseBody = api.downloadFile(resolvedPatchUrl)
                 saveStreamToFile(responseBody, patchFile, patchInfo.patchSizeBytes) { progress, downloaded, total ->
                     _updateStatus.value = UpdateStatus.Downloading(progress, downloaded, total)
                 }
@@ -149,7 +177,8 @@ class UpdateRepository(
         val fullApkFile = File(cacheDir, "tally-v${updateInfo.latestVersionCode}-full.apk")
 
         try {
-            val responseBody = api.downloadFile(updateInfo.fullApkUrl)
+            val resolvedFullUrl = resolveDownloadUrl(serverConfig, updateInfo.fullApkUrl)
+            val responseBody = api.downloadFile(resolvedFullUrl)
             saveStreamToFile(responseBody, fullApkFile, updateInfo.fullApkSizeBytes) { progress, downloaded, total ->
                 _updateStatus.value = UpdateStatus.Downloading(progress, downloaded, total)
             }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import ng.name.nsikak.libaccession.data.api.MdnsDnsResolver
 import ng.name.nsikak.libaccession.data.settings.ServerConfig
 import java.net.Inet4Address
 import java.net.InetAddress
@@ -23,7 +24,7 @@ data class DiscoveredServer(val host: String, val port: Int, val via: String)
  *     Gives both the IP and the real port.
  *  2. Fallback: resolve "school.local" through the system resolver (works on some devices only).
  */
-class ServerDiscovery(context: Context) {
+class ServerDiscovery(private val context: Context) {
     private val nsd = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
 
     suspend fun discover(): DiscoveredServer? =
@@ -74,8 +75,17 @@ class ServerDiscovery(context: Context) {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = onDone(null)
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                val address = ipv4Of(serviceInfo)?.hostAddress
-                onDone(address?.let { DiscoveredServer(it, serviceInfo.port, "mDNS service") })
+                val rawHost = serviceInfo.host?.hostName
+                val ipAddress = ipv4Of(serviceInfo)?.hostAddress
+                val host = if (!rawHost.isNullOrEmpty() && !IPV4_PATTERN.matches(rawHost)) {
+                    val clean = rawHost.trim('.')
+                    if (clean.lowercase().endsWith(".local")) clean else "$clean.local"
+                } else if (!ipAddress.isNullOrEmpty()) {
+                    ipAddress
+                } else {
+                    MDNS_HOST
+                }
+                onDone(DiscoveredServer(host, serviceInfo.port, "mDNS service"))
             }
         })
     }
@@ -89,9 +99,11 @@ class ServerDiscovery(context: Context) {
         }
 
     private suspend fun resolveHostname(): DiscoveredServer? {
-        // getAllByName can't be interrupted, so run it detached and just stop waiting after the timeout.
         val lookup = CoroutineScope(Dispatchers.IO).async {
-            runCatching { InetAddress.getAllByName(MDNS_HOST).any { it is Inet4Address } }.getOrDefault(false)
+            runCatching {
+                val addresses = MdnsDnsResolver(context).lookup(MDNS_HOST)
+                addresses.any { it is Inet4Address }
+            }.getOrDefault(false)
         }
         val resolved = withTimeoutOrNull(HOST_TIMEOUT_MS) { lookup.await() } ?: false
         // Keep the NAME (not the IP): it survives DHCP changes and is on the cleartext allow-list.
@@ -99,6 +111,7 @@ class ServerDiscovery(context: Context) {
     }
 
     private companion object {
+        val IPV4_PATTERN = Regex("""\d{1,3}(\.\d{1,3}){3}""")
         const val SERVICE_TYPE = "_library._tcp"
         const val MDNS_HOST = "school.local"
         const val NSD_TIMEOUT_MS = 4_000L

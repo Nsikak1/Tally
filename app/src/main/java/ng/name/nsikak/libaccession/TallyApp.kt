@@ -25,7 +25,7 @@ import ng.name.nsikak.libaccession.domain.AccessionFormat
 /** Hand-rolled DI: one place that owns the app-wide singletons. */
 class AppContainer(context: Context) {
     val settings = SettingsStore(context.applicationContext)
-    val apiFactory = ApiFactory()
+    val apiFactory = ApiFactory(context.applicationContext)
     val apiProvider = ApiProvider(settings, apiFactory)
     val updateRepository = UpdateRepository(context.applicationContext, apiFactory)
     val discovery = ServerDiscovery(context.applicationContext)
