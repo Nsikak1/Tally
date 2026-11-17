@@ -10,6 +10,8 @@
 .cxx/
 # Gradle files
 build/
+# ...but keep source packages named "build" inside buildSrc
+!buildSrc/src/**/build/
 .kotlin/
 
 # Model Download file
