@@ -104,7 +104,15 @@ class SettingsStore(private val context: Context) {
         const val DEFAULT_DOUBLE_TAP_ZOOM = 2.5f
         const val DEFAULT_OCR_MODEL = "small"
         /** ILS-X+ = ILS- and any number of digits; ILS-SR-XX-X+ = ILS-SR-, two digits, a dash, then any number of digits. */
-        val DEFAULT_ACCESSION_FORMATS = listOf("ILS-SR-XX-X+", "ILS-X+")
+        val DEFAULT_ACCESSION_FORMATS = listOf(
+            "ILS-X+",
+            "ILS-SR-XX-X+",
+            "ILS-SR-22-X+",
+            "ILS-SR-23-X+",
+            "ILS-SR-24-X+",
+            "ILS-SR-25-X+",
+            "ILS-SR-26-X+"
+        )
         val DEFAULT_ACCESSION_FORMAT: String = DEFAULT_ACCESSION_FORMATS.joinToString("\n")
 
         /** One format per line (or comma): trimmed, upper-cased, empties dropped; never empty (falls back to the default). */

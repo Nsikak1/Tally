@@ -1,5 +1,6 @@
 package ng.name.nsikak.libaccession.data.settings
 
+import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -9,6 +10,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * so Retrofit can use it directly. Create instances with [parseServerAddress], never by hand,
  * except for the constants below.
  */
+@Serializable
 data class ServerConfig(val baseUrl: String) {
     private val url: HttpUrl get() = baseUrl.toHttpUrl()
 

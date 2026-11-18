@@ -38,7 +38,7 @@ android {
             // armeabi-v7a = 32-bit ARM (your Termux device). For 64-bit tablets use "arm64-v8a",
             // or list both to run on either at the cost of a bigger download.
             ndk {
-                abiFilters += listOf("armeabi-v7a")
+                abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             }
         }
     }

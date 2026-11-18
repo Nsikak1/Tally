@@ -151,17 +151,11 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun performUpdate(updateAvailable: UpdateStatus.UpdateAvailable) {
         val config = currentConfig() ?: return
-        updateJob?.cancel()
-        updateJob = viewModelScope.launch {
-            val result = container.updateRepository.downloadAndPrepareUpdate(
-                serverConfig = config,
-                updateInfo = updateAvailable.updateInfo,
-                patchInfo = updateAvailable.availablePatch
-            )
-            if (result is UpdateStatus.ReadyToInstall) {
-                container.updateRepository.installUpdate(result.apkPath)
-            }
-        }
+        container.updateRepository.startBackgroundDownload(
+            serverConfig = config,
+            updateInfo = updateAvailable.updateInfo,
+            patchInfo = updateAvailable.availablePatch
+        )
     }
 
     fun installPreparedUpdate(ready: UpdateStatus.ReadyToInstall) {

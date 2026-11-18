@@ -3,7 +3,9 @@ package ng.name.nsikak.libaccession.data.update
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +34,7 @@ class UpdateRepository(
     private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
     val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
 
-    private val json = Json {
+    val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
     }
@@ -254,6 +256,14 @@ class UpdateRepository(
         }
     }
 
+    fun startBackgroundDownload(
+        serverConfig: ServerConfig,
+        updateInfo: UpdateInfoResponse,
+        patchInfo: PatchInfo?
+    ) {
+        UpdateDownloadService.startDownload(context, serverConfig, updateInfo, patchInfo, json)
+    }
+
     fun installUpdate(apkPath: String): Boolean {
         val file = File(apkPath)
         return AppInstaller.installApk(context, file)
@@ -270,15 +280,14 @@ class UpdateRepository(
         targetFile: File,
         expectedSizeBytes: Long,
         expectedSha256: String? = null,
-        maxRetries: Int = 5,
         onProgress: (progressPercent: Int, downloaded: Long, total: Long) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         val resolvedUrl = resolveDownloadUrl(serverConfig, urlString)
-        var attempt = 0
+        var retryDelaySeconds = 2L
+        val maxRetryDelaySeconds = 300L // 5 minutes cap
         var lastException: Exception? = null
 
-        while (attempt < maxRetries) {
-            attempt++
+        while (coroutineContext[Job]?.isActive != false) {
             try {
                 if (targetFile.exists()) {
                     val currentLen = targetFile.length()
@@ -338,14 +347,17 @@ class UpdateRepository(
                     append = append,
                     startDownloaded = startDownloaded,
                     totalBytes = totalBytes,
-                    onProgress = onProgress
+                    onProgress = { progress, downloaded, total ->
+                        // Successful chunk receive -> reset retry timer back to 2 seconds
+                        retryDelaySeconds = 2L
+                        onProgress(progress, downloaded, total)
+                    }
                 )
 
                 val finalLen = targetFile.length()
                 if (expectedSizeBytes > 0 && finalLen < expectedSizeBytes) {
-                    if (attempt < maxRetries) {
-                        delay(1000L * attempt)
-                    }
+                    delay(retryDelaySeconds * 1000L)
+                    retryDelaySeconds = (retryDelaySeconds + 2L).coerceAtMost(maxRetryDelaySeconds)
                     continue
                 }
 
@@ -359,14 +371,22 @@ class UpdateRepository(
 
                 return@withContext true
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 lastException = e
                 if (e is HttpException && e.code() == 404) {
                     throw e
                 }
-                if (attempt >= maxRetries) {
-                    throw e
-                }
-                delay(1000L * attempt)
+
+                val currentBytes = if (targetFile.exists()) targetFile.length() else 0L
+                val pct = if (expectedSizeBytes > 0) ((currentBytes * 100 / expectedSizeBytes).toInt()).coerceIn(0, 100) else 0
+                _updateStatus.value = UpdateStatus.Downloading(
+                    progressPercent = pct,
+                    bytesDownloaded = currentBytes,
+                    totalBytes = expectedSizeBytes
+                )
+
+                delay(retryDelaySeconds * 1000L)
+                retryDelaySeconds = (retryDelaySeconds + 2L).coerceAtMost(maxRetryDelaySeconds)
             }
         }
 

@@ -9,8 +9,16 @@ package ng.name.nsikak.libaccession.domain
  * Several formats can be active at once; a number is fine if it matches ANY of them.
  */
 object AccessionFormat {
-    /** The school's two formats, most specific first (typed text is matched against them in this order). */
-    val DEFAULTS = listOf("ILS-SR-XX-X+", "ILS-X+")
+    /** Default ILS accession number formats. */
+    val DEFAULTS = listOf(
+        "ILS-X+",
+        "ILS-SR-XX-X+",
+        "ILS-SR-22-X+",
+        "ILS-SR-23-X+",
+        "ILS-SR-24-X+",
+        "ILS-SR-25-X+",
+        "ILS-SR-26-X+"
+    )
 
     @Volatile
     var patterns: List<String> = DEFAULTS
