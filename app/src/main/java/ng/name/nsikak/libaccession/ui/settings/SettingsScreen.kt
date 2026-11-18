@@ -55,6 +55,7 @@ import ng.name.nsikak.libaccession.data.api.ConnectionResult
 import ng.name.nsikak.libaccession.data.settings.parseServerAddress
 import ng.name.nsikak.libaccession.data.update.UpdateStatus
 import ng.name.nsikak.libaccession.ui.AppViewModelProvider
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -360,9 +361,16 @@ fun SettingsScreen(
                 }
                 is UpdateStatus.Downloading -> {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Downloading update... ${status.progressPercent}%")
+                        val progressText = if (status.totalBytes > 0) {
+                            val downloadedMb = String.format(Locale.US, "%.1f", status.bytesDownloaded / (1024f * 1024f))
+                            val totalMb = String.format(Locale.US, "%.1f", status.totalBytes / (1024f * 1024f))
+                            "Downloading update... $downloadedMb MB / $totalMb MB (${status.progressPercent}%)"
+                        } else {
+                            "Downloading update... ${status.progressPercent}%"
+                        }
+                        Text(progressText)
                         LinearProgressIndicator(
-                            progress = { status.progressPercent / 100f },
+                            progress = { (status.progressPercent / 100f).coerceIn(0f, 1f) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

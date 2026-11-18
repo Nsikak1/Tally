@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,14 +15,13 @@ import ng.name.nsikak.libaccession.data.settings.ServerConfig
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class UpdateRepository(
@@ -39,8 +39,10 @@ class UpdateRepository(
 
     private fun createUpdateApi(config: ServerConfig): UpdateApi {
         val client = apiFactory.httpClient.newBuilder()
-            .connectTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
             .build()
 
         return Retrofit.Builder()
@@ -137,21 +139,42 @@ class UpdateRepository(
         val cacheDir = context.cacheDir
         val currentCode = getCurrentVersionCode()
 
+        cleanupOldUpdateFiles(cacheDir, updateInfo.latestVersionCode)
+
         val api = createUpdateApi(serverConfig)
 
         if (patchInfo != null) {
             // Delta Patch Flow
-            _updateStatus.value = UpdateStatus.Downloading(0, 0, patchInfo.patchSizeBytes)
             val patchFile = File(cacheDir, "patch-v$currentCode-to-v${updateInfo.latestVersionCode}.patch")
             val patchedApkFile = File(cacheDir, "tally-v${updateInfo.latestVersionCode}-delta.apk")
+            _updateStatus.value = UpdateStatus.Downloading(
+                progressPercent = if (patchFile.exists() && patchInfo.patchSizeBytes > 0) {
+                    ((patchFile.length() * 100 / patchInfo.patchSizeBytes).toInt()).coerceIn(0, 100)
+                } else 0,
+                bytesDownloaded = if (patchFile.exists()) patchFile.length() else 0L,
+                totalBytes = patchInfo.patchSizeBytes
+            )
+
+            var patchDownloadSuccess = false
+            var patchDownloadError: Exception? = null
 
             try {
-                val resolvedPatchUrl = resolveDownloadUrl(serverConfig, patchInfo.patchUrl)
-                val responseBody = api.downloadFile(resolvedPatchUrl)
-                saveStreamToFile(responseBody, patchFile, patchInfo.patchSizeBytes) { progress, downloaded, total ->
-                    _updateStatus.value = UpdateStatus.Downloading(progress, downloaded, total)
-                }
+                patchDownloadSuccess = downloadFileWithResumeAndRetry(
+                    api = api,
+                    serverConfig = serverConfig,
+                    urlString = patchInfo.patchUrl,
+                    targetFile = patchFile,
+                    expectedSizeBytes = patchInfo.patchSizeBytes,
+                    expectedSha256 = patchInfo.patchSha256,
+                    onProgress = { progress, downloaded, total ->
+                        _updateStatus.value = UpdateStatus.Downloading(progress, downloaded, total)
+                    }
+                )
+            } catch (e: Exception) {
+                patchDownloadError = e
+            }
 
+            if (patchDownloadSuccess) {
                 _updateStatus.value = UpdateStatus.Patching("Applying delta patch to installed app...")
                 val sourceApk = File(context.applicationInfo.sourceDir)
 
@@ -166,37 +189,60 @@ class UpdateRepository(
                     patchedApkFile.delete()
                     // Patch reconstruction failed or verification failed -> Fallback to Full APK download
                 }
-            } catch (_: Exception) {
+            } else if (patchDownloadError is HttpException && patchDownloadError.code() == 404) {
+                // Patch file missing on server (404), fallback to full APK
                 patchFile.delete()
-                patchedApkFile.delete()
+            } else if (patchDownloadError != null) {
+                // Network error during patch download: do NOT fall back to full APK (which would also fail).
+                // Keep partial patch file for resume.
+                val error = UpdateStatus.Error("Failed to download patch: ${patchDownloadError.localizedMessage ?: "Network error"}")
+                _updateStatus.value = error
+                return@withContext error
             }
         }
 
         // Full APK Download Flow
-        _updateStatus.value = UpdateStatus.Downloading(0, 0, updateInfo.fullApkSizeBytes)
         val fullApkFile = File(cacheDir, "tally-v${updateInfo.latestVersionCode}-full.apk")
+        _updateStatus.value = UpdateStatus.Downloading(
+            progressPercent = if (fullApkFile.exists() && updateInfo.fullApkSizeBytes > 0) {
+                ((fullApkFile.length() * 100 / updateInfo.fullApkSizeBytes).toInt()).coerceIn(0, 100)
+            } else 0,
+            bytesDownloaded = if (fullApkFile.exists()) fullApkFile.length() else 0L,
+            totalBytes = updateInfo.fullApkSizeBytes
+        )
 
         try {
-            val resolvedFullUrl = resolveDownloadUrl(serverConfig, updateInfo.fullApkUrl)
-            val responseBody = api.downloadFile(resolvedFullUrl)
-            saveStreamToFile(responseBody, fullApkFile, updateInfo.fullApkSizeBytes) { progress, downloaded, total ->
-                _updateStatus.value = UpdateStatus.Downloading(progress, downloaded, total)
-            }
+            val downloadSuccess = downloadFileWithResumeAndRetry(
+                api = api,
+                serverConfig = serverConfig,
+                urlString = updateInfo.fullApkUrl,
+                targetFile = fullApkFile,
+                expectedSizeBytes = updateInfo.fullApkSizeBytes,
+                expectedSha256 = updateInfo.fullApkSha256,
+                onProgress = { progress, downloaded, total ->
+                    _updateStatus.value = UpdateStatus.Downloading(progress, downloaded, total)
+                }
+            )
 
-            _updateStatus.value = UpdateStatus.Patching("Verifying APK integrity...")
-            if (ApkVerifier.verifyApk(context, fullApkFile, updateInfo.fullApkSha256)) {
-                val ready = UpdateStatus.ReadyToInstall(fullApkFile.absolutePath, isDeltaPatch = false)
-                _updateStatus.value = ready
-                ready
+            if (downloadSuccess) {
+                _updateStatus.value = UpdateStatus.Patching("Verifying APK integrity...")
+                if (ApkVerifier.verifyApk(context, fullApkFile, updateInfo.fullApkSha256)) {
+                    val ready = UpdateStatus.ReadyToInstall(fullApkFile.absolutePath, isDeltaPatch = false)
+                    _updateStatus.value = ready
+                    ready
+                } else {
+                    fullApkFile.delete()
+                    val error = UpdateStatus.Error("APK verification failed: Hash mismatch or untrusted signature.")
+                    _updateStatus.value = error
+                    error
+                }
             } else {
-                fullApkFile.delete()
-                val error = UpdateStatus.Error("APK verification failed: Hash mismatch or untrusted signature.")
+                val error = UpdateStatus.Error("Failed to download full update.")
                 _updateStatus.value = error
                 error
             }
         } catch (e: Exception) {
-            fullApkFile.delete()
-            val error = UpdateStatus.Error("Failed to download full update: ${e.localizedMessage}")
+            val error = UpdateStatus.Error("Failed to download full update: ${e.localizedMessage ?: "Network error"}")
             _updateStatus.value = error
             error
         }
@@ -211,24 +257,169 @@ class UpdateRepository(
 
     fun openInstallPermissionSettings() = AppInstaller.openInstallPermissionSettings(context)
 
-    private suspend fun saveStreamToFile(
+    private suspend fun downloadFileWithResumeAndRetry(
+        api: UpdateApi,
+        serverConfig: ServerConfig,
+        urlString: String,
+        targetFile: File,
+        expectedSizeBytes: Long,
+        expectedSha256: String? = null,
+        maxRetries: Int = 5,
+        onProgress: (progressPercent: Int, downloaded: Long, total: Long) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        val resolvedUrl = resolveDownloadUrl(serverConfig, urlString)
+        var attempt = 0
+        var lastException: Exception? = null
+
+        while (attempt < maxRetries) {
+            attempt++
+            try {
+                if (targetFile.exists()) {
+                    val currentLen = targetFile.length()
+                    if (expectedSizeBytes > 0 && currentLen == expectedSizeBytes) {
+                        if (!expectedSha256.isNullOrBlank()) {
+                            val hash = ApkVerifier.calculateSha256(targetFile)
+                            if (hash.equals(expectedSha256.trim(), ignoreCase = true)) {
+                                onProgress(100, expectedSizeBytes, expectedSizeBytes)
+                                return@withContext true
+                            } else {
+                                targetFile.delete()
+                            }
+                        } else {
+                            onProgress(100, expectedSizeBytes, expectedSizeBytes)
+                            return@withContext true
+                        }
+                    } else if (expectedSizeBytes > 0 && currentLen > expectedSizeBytes) {
+                        targetFile.delete()
+                    }
+                }
+
+                val existingLength = if (targetFile.exists()) targetFile.length() else 0L
+                val rangeHeader = if (existingLength > 0) "bytes=$existingLength-" else null
+
+                val response = api.downloadFile(resolvedUrl, rangeHeader)
+                if (!response.isSuccessful) {
+                    val code = response.code()
+                    if (code == 416 && existingLength > 0) {
+                        targetFile.delete()
+                        continue
+                    }
+                    if (code == 404) {
+                        throw HttpException(response)
+                    }
+                    throw IOException("HTTP download failed with status code $code: ${response.message()}")
+                }
+
+                val responseBody = response.body() ?: throw IOException("Empty download response body")
+                val isPartial = response.code() == 206
+                val append = isPartial && existingLength > 0
+
+                val startDownloaded = if (append) existingLength else 0L
+                val contentLength = responseBody.contentLength()
+                val totalBytes = when {
+                    isPartial -> {
+                        val contentRangeHeader = response.headers()["Content-Range"]
+                        val parsedTotal = parseTotalFromContentRange(contentRangeHeader)
+                        if (parsedTotal > 0) parsedTotal else if (contentLength > 0) startDownloaded + contentLength else expectedSizeBytes
+                    }
+                    contentLength > 0 -> contentLength
+                    else -> expectedSizeBytes
+                }
+
+                saveResponseBodyToFile(
+                    body = responseBody,
+                    outputFile = targetFile,
+                    append = append,
+                    startDownloaded = startDownloaded,
+                    totalBytes = totalBytes,
+                    onProgress = onProgress
+                )
+
+                val finalLen = targetFile.length()
+                if (expectedSizeBytes > 0 && finalLen < expectedSizeBytes) {
+                    if (attempt < maxRetries) {
+                        delay(1000L * attempt)
+                    }
+                    continue
+                }
+
+                if (!expectedSha256.isNullOrBlank()) {
+                    val actualHash = ApkVerifier.calculateSha256(targetFile)
+                    if (!actualHash.equals(expectedSha256.trim(), ignoreCase = true)) {
+                        targetFile.delete()
+                        throw IOException("Downloaded file SHA-256 hash mismatch.")
+                    }
+                }
+
+                return@withContext true
+            } catch (e: Exception) {
+                lastException = e
+                if (e is HttpException && e.code() == 404) {
+                    throw e
+                }
+                if (attempt >= maxRetries) {
+                    throw e
+                }
+                delay(1000L * attempt)
+            }
+        }
+
+        if (lastException != null) throw lastException
+        return@withContext false
+    }
+
+    internal fun parseTotalFromContentRange(header: String?): Long {
+        if (header.isNullOrBlank()) return -1L
+        return try {
+            val slashIndex = header.indexOf('/')
+            if (slashIndex != -1) {
+                val totalStr = header.substring(slashIndex + 1).trim()
+                if (totalStr != "*") totalStr.toLong() else -1L
+            } else -1L
+        } catch (_: Exception) {
+            -1L
+        }
+    }
+
+    private fun cleanupOldUpdateFiles(cacheDir: File, targetVersionCode: Long) {
+        try {
+            val files = cacheDir.listFiles() ?: return
+            for (file in files) {
+                val name = file.name
+                if (name.startsWith("patch-v") && name.endsWith(".patch")) {
+                    if (!name.endsWith("-to-v$targetVersionCode.patch")) {
+                        file.delete()
+                    }
+                } else if (name.startsWith("tally-v") && name.endsWith(".apk")) {
+                    if (!name.startsWith("tally-v$targetVersionCode-")) {
+                        file.delete()
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Ignore cleanup errors
+        }
+    }
+
+    private suspend fun saveResponseBodyToFile(
         body: ResponseBody,
         outputFile: File,
-        contentLengthHeader: Long,
+        append: Boolean,
+        startDownloaded: Long,
+        totalBytes: Long,
         onProgress: (progressPercent: Int, downloaded: Long, total: Long) -> Unit
     ) = withContext(Dispatchers.IO) {
-        val totalLength = if (body.contentLength() > 0) body.contentLength() else contentLengthHeader
         val buffer = ByteArray(8192)
-        var downloaded = 0L
+        var downloaded = startDownloaded
 
         body.byteStream().use { input ->
-            FileOutputStream(outputFile).use { output ->
+            FileOutputStream(outputFile, append).use { output ->
                 var read: Int
                 while (input.read(buffer).also { read = it } != -1) {
                     output.write(buffer, 0, read)
                     downloaded += read
-                    val progress = if (totalLength > 0) ((downloaded * 100) / totalLength).toInt() else 0
-                    onProgress(progress, downloaded, totalLength)
+                    val progress = if (totalBytes > 0) ((downloaded * 100 / totalBytes).toInt()).coerceIn(0, 100) else 0
+                    onProgress(progress, downloaded, totalBytes)
                 }
                 output.flush()
             }
