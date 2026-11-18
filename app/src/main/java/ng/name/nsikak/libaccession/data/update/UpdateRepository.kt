@@ -181,7 +181,11 @@ class UpdateRepository(
                 val patchSuccess = DeltaPatcher.applyPatch(sourceApk, patchFile, patchedApkFile)
                 patchFile.delete()
 
-                if (patchSuccess && ApkVerifier.verifyApk(context, patchedApkFile, updateInfo.fullApkSha256)) {
+                val patchVerification = if (patchSuccess) {
+                    ApkVerifier.verifyApkDetailed(context, patchedApkFile, updateInfo.fullApkSha256)
+                } else VerificationResult.Failure("Delta patch reconstruction failed.")
+
+                if (patchVerification is VerificationResult.Success) {
                     val ready = UpdateStatus.ReadyToInstall(patchedApkFile.absolutePath, isDeltaPatch = true)
                     _updateStatus.value = ready
                     return@withContext ready
@@ -226,13 +230,15 @@ class UpdateRepository(
 
             if (downloadSuccess) {
                 _updateStatus.value = UpdateStatus.Patching("Verifying APK integrity...")
-                if (ApkVerifier.verifyApk(context, fullApkFile, updateInfo.fullApkSha256)) {
+                val fullVerification = ApkVerifier.verifyApkDetailed(context, fullApkFile, updateInfo.fullApkSha256)
+                if (fullVerification is VerificationResult.Success) {
                     val ready = UpdateStatus.ReadyToInstall(fullApkFile.absolutePath, isDeltaPatch = false)
                     _updateStatus.value = ready
                     ready
                 } else {
                     fullApkFile.delete()
-                    val error = UpdateStatus.Error("APK verification failed: Hash mismatch or untrusted signature.")
+                    val reason = (fullVerification as? VerificationResult.Failure)?.reason ?: "Verification failed."
+                    val error = UpdateStatus.Error("APK verification failed: $reason")
                     _updateStatus.value = error
                     error
                 }

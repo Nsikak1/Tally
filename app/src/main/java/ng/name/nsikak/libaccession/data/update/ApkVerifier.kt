@@ -8,6 +8,11 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 
+sealed interface VerificationResult {
+    data object Success : VerificationResult
+    data class Failure(val reason: String) : VerificationResult
+}
+
 object ApkVerifier {
 
     /** Calculates hex SHA-256 string for the given file. */
@@ -29,59 +34,99 @@ object ApkVerifier {
      * the same signing certificates.
      */
     fun verifyApk(context: Context, apkFile: File, expectedSha256: String? = null): Boolean {
-        if (!apkFile.exists()) return false
+        return verifyApkDetailed(context, apkFile, expectedSha256) is VerificationResult.Success
+    }
 
-        if (!expectedSha256.isNull_or_empty()) {
+    fun verifyApkDetailed(context: Context, apkFile: File, expectedSha256: String? = null): VerificationResult {
+        if (!apkFile.exists()) {
+            return VerificationResult.Failure("APK file does not exist.")
+        }
+
+        if (!expectedSha256.isNullOrBlank()) {
             val calculatedHash = calculateSha256(apkFile)
-            if (!calculatedHash.equals(expectedSha256?.trim(), ignoreCase = true)) {
-                return false
+            if (!calculatedHash.equals(expectedSha256.trim(), ignoreCase = true)) {
+                return VerificationResult.Failure(
+                    "SHA-256 hash mismatch. Expected: ${expectedSha256.trim().take(12)}... Got: ${calculatedHash.take(12)}..."
+                )
             }
         }
 
         val pm = context.packageManager
+        @Suppress("DEPRECATION")
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            PackageManager.GET_SIGNING_CERTIFICATES
+            PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
         } else {
-            @Suppress("DEPRECATION")
             PackageManager.GET_SIGNATURES
         }
 
-        val archiveInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, flags) ?: return false
+        val archiveInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, flags)
+            ?: return VerificationResult.Failure("Failed to parse package info from APK archive.")
 
-        // Check package name matches current app
-        if (archiveInfo.packageName != context.packageName) {
-            return false
+        archiveInfo.applicationInfo?.let { appInfo ->
+            appInfo.sourceDir = apkFile.absolutePath
+            appInfo.publicSourceDir = apkFile.absolutePath
         }
 
-        // Check signatures match current running package
-        val installedPkg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(flags.toLong()))
-        } else {
-            @Suppress("DEPRECATION")
-            pm.getPackageInfo(context.packageName, flags)
+        if (archiveInfo.packageName != context.packageName) {
+            return VerificationResult.Failure(
+                "Package name mismatch. Expected: ${context.packageName}, Found: ${archiveInfo.packageName}"
+            )
+        }
+
+        val installedPkg = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(flags.toLong()))
+            } else {
+                pm.getPackageInfo(context.packageName, flags)
+            }
+        } catch (e: Exception) {
+            return VerificationResult.Failure("Failed to retrieve installed package info: ${e.message}")
         }
 
         val archiveSigs = getSignatures(archiveInfo)
         val installedSigs = getSignatures(installedPkg)
 
-        if (archiveSigs.isEmpty() || installedSigs.isEmpty()) return false
+        if (archiveSigs.isEmpty()) {
+            return VerificationResult.Failure("No signing certificates found in update APK archive.")
+        }
 
-        return archiveSigs.any { archiveSig -> installedSigs.any { it.contentEquals(archiveSig) } }
-    }
+        if (installedSigs.isEmpty()) {
+            return VerificationResult.Failure("No signing certificates found in installed app.")
+        }
 
-    private fun getSignatures(pkgInfo: PackageInfo): List<ByteArray> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val signingInfo = pkgInfo.signingInfo ?: return emptyList()
-            if (signingInfo.hasMultipleSigners()) {
-                signingInfo.apkContentsSigners.map { it.toByteArray() }
-            } else {
-                signingInfo.signingCertificateHistory.map { it.toByteArray() }
-            }
+        val matches = archiveSigs.any { archiveSig -> installedSigs.any { it.contentEquals(archiveSig) } }
+        return if (matches) {
+            VerificationResult.Success
         } else {
-            @Suppress("DEPRECATION")
-            pkgInfo.signatures?.map { it.toByteArray() } ?: emptyList()
+            VerificationResult.Failure("Signing certificate mismatch between installed app and update APK.")
         }
     }
 
-    private fun String?.isNull_or_empty(): Boolean = this == null || this.trim().isEmpty()
+    private fun getSignatures(pkgInfo: PackageInfo): List<ByteArray> {
+        val result = mutableListOf<ByteArray>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signingInfo = pkgInfo.signingInfo
+            if (signingInfo != null) {
+                val sigs = if (signingInfo.hasMultipleSigners()) {
+                    signingInfo.apkContentsSigners
+                } else {
+                    signingInfo.signingCertificateHistory
+                }
+                if (sigs != null && sigs.isNotEmpty()) {
+                    sigs.mapTo(result) { it.toByteArray() }
+                }
+            }
+        }
+
+        if (result.isEmpty()) {
+            @Suppress("DEPRECATION")
+            val legacySigs = pkgInfo.signatures
+            if (legacySigs != null && legacySigs.isNotEmpty()) {
+                legacySigs.mapTo(result) { it.toByteArray() }
+            }
+        }
+
+        return result
+    }
 }

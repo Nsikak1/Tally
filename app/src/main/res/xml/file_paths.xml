@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- Root cache directory for update APKs and patch files -->
+    <cache-path name="cache" path="." />
     <!-- Where the "Share samples" zip is written before being handed to the share sheet. -->
     <cache-path name="share" path="share/" />
 </paths>
